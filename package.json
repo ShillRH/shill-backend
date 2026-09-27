@@ -1,0 +1,30 @@
+{
+  "name": "shill-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend for the $SHILL launchpad: launch wallets, Pons deploys, social tracking, scoring, trust, payout cycles.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "start:worker": "tsx src/workers/index.ts",
+    "migrate": "tsx src/migrate.ts",
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/workers/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "test:sim": "node --no-warnings --import tsx --import ./test/sim/register.mjs test/sim/e2e.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "viem": "^2.21.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.6.0"
+  }
+}
