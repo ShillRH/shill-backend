@@ -769,6 +769,13 @@ legend+*{clear:both}
 .grad .row{display:flex;justify-content:space-between;font-size:15px;color:var(--muted)}
 .grad .row b{color:var(--text);font-weight:600}
 .grad .meter{height:8px;border-radius:4px;margin:0}
+.chart{border:1px solid var(--line);border-radius:18px;padding:18px 22px;margin-bottom:20px;display:grid;gap:12px}
+.chart .bar{margin:0;align-items:center}
+.chart .now{font-size:15px;color:var(--muted)}.chart .now b{color:var(--text);font-weight:600;font-size:20px;margin:0 6px}
+.pcbox{position:relative;height:240px}.pcbox svg{display:block;width:100%;height:100%;touch-action:pan-y}
+.pcbox .emp{height:100%;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:14px;padding:0 20px}
+.pctip{position:absolute;top:0;pointer-events:none;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:4px 8px;font-size:12px;white-space:nowrap;color:var(--muted)}.pctip b{color:var(--text);font-weight:600}
+.pcfoot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -892,6 +899,7 @@ const api = {
   async token(id){return (await this.get("/tokens/"+id)) ?? (CONFIG.DEMO?SAMPLE.tokens.find(t=>t.id===id):null);},
   async payouts(id){return (await this.get(id?"/tokens/"+id+"/payouts":"/payouts")) ?? (CONFIG.DEMO?SAMPLE.payouts.filter(p=>!id||p.ticker.toLowerCase()===id):[]);},
   async leaderboard(id){return (await this.get(id?"/tokens/"+id+"/leaderboard":"/leaderboard")) ?? (CONFIG.DEMO?SAMPLE.shillers:[]);},
+  async chart(id){try{return (await this.get("/tokens/"+id+"/chart")) ?? (CONFIG.DEMO?demoChart():[]);}catch{return [];}},
   async stats(){return (await this.get("/stats")) ?? (CONFIG.DEMO?{paid:SAMPLE.tokens.reduce((a,t)=>a+t.paid,0),posts:SAMPLE.tokens.reduce((a,t)=>a+t.posts,0)}:{paid:0,posts:0});}
 };
 
@@ -1207,11 +1215,56 @@ async function viewLeaderboard(){
   const q0=pendingQ;pendingQ="";$("#lq").value=q0;draw(q0);$("#lq").oninput=e=>draw(e.target.value);
 }
 
+/* ---------- token price chart ---------- */
+function demoChart(){const out=[],now=Date.now();let p=0.00002;for(let i=7*96;i>=0;i--){p*=1+(Math.random()-.47)*.04;out.push([now-i*9e5,p]);}return out;}
+const tinyUsd=n=>n>=0.01?usd(n):"$"+n.toPrecision(3);
+function priceChart(t,raw){
+  // Plot market cap when we know the supply (mcap / price), otherwise the raw price.
+  const supply=t.mcap>0&&t.price>0?t.mcap/t.price:0,val=p=>supply?p*supply:p,fmt=supply?usd:tinyUsd;
+  const pts=(raw||[]).filter(r=>r[1]>0).map(r=>[r[0],val(r[1])]);
+  const box=$("#pcBox"),tabs=[...document.querySelectorAll("#pcRange .tab")];
+  let range=pts.length&&pts[pts.length-1][0]-pts[0][0]>864e5?"7":"all";
+  const draw=()=>{
+    tabs.forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.r===range)));
+    let d=range==="all"?pts:pts.filter(p=>p[0]>=Date.now()-(+range)*864e5);
+    if(d.length>400){const k=Math.ceil(d.length/400);d=d.filter((_,i)=>i%k===0||i===d.length-1);}
+    const last=pts[pts.length-1];
+    $("#pcNow").textContent=last?fmt(last[1]):"—";
+    const chg=d.length>1?(d[d.length-1][1]-d[0][1])/d[0][1]*100:null;
+    $("#pcChg").innerHTML=chg==null?"":`<span class="${chg>=0?"up":"down"}">${chg>=0?"+":""}${chg.toFixed(1)}%</span>`;
+    if(d.length<2){box.innerHTML=`<div class="emp">Not enough price data yet. The chart fills in as the tracker records the price every 15 minutes.</div>`;return;}
+    const W=box.clientWidth||600,H=box.clientHeight||240,L=64,R=8,T=10,B=24;
+    let lo=Math.min(...d.map(p=>p[1])),hi=Math.max(...d.map(p=>p[1]));if(hi===lo){hi*=1.05;lo*=.95;}
+    const t0=d[0][0],t1=d[d.length-1][0],x=v=>L+(v-t0)/(t1-t0||1)*(W-L-R),y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+    const line=d.map((p,i)=>(i?"L":"M")+x(p[0]).toFixed(1)+" "+y(p[1]).toFixed(1)).join("");
+    const col=chg>=0?"var(--up)":"var(--down)",span=t1-t0;
+    const tl=v=>{const dt=new Date(v);return span>1728e5?dt.toLocaleDateString([],{month:"short",day:"numeric"}):dt.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});};
+    const grid=[0,.5,1].map(f=>{const v=lo+(hi-lo)*f,yy=y(v).toFixed(1);return `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${L-8}" y="${yy}" dy="4" text-anchor="end" font-size="11" fill="var(--faint)">${esc(fmt(v))}</text>`;}).join("");
+    const xl=[0,.5,1].map(f=>{const v=t0+span*f;return `<text x="${x(v).toFixed(1)}" y="${H-6}" text-anchor="${f===0?"start":f===1?"end":"middle"}" font-size="11" fill="var(--faint)">${esc(tl(v))}</text>`;}).join("");
+    box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${supply?"Market cap":"Price"} chart for $${esc(t.ticker)}">${grid}${xl}
+      <path d="${line}L${x(t1).toFixed(1)} ${H-B}L${L} ${H-B}Z" fill="${col}" opacity=".08"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>
+      <g id="pcHov" style="display:none"><line id="pcHl" y1="${T}" y2="${H-B}" stroke="var(--line-2)"/><circle id="pcHd" r="4" fill="${col}"/></g></svg><div class="pctip" id="pcTip" style="display:none"></div>`;
+    const svg=box.firstChild,hov=$("#pcHov"),tip=$("#pcTip");
+    svg.onpointermove=e=>{
+      const r=svg.getBoundingClientRect(),mx=(e.clientX-r.left)*W/r.width,tv=t0+(mx-L)/(W-L-R)*(t1-t0);
+      let p=d[0];for(const q of d)if(Math.abs(q[0]-tv)<Math.abs(p[0]-tv))p=q;
+      const px=x(p[0]);hov.style.display="";$("#pcHl").setAttribute("x1",px);$("#pcHl").setAttribute("x2",px);$("#pcHd").setAttribute("cx",px);$("#pcHd").setAttribute("cy",y(p[1]));
+      tip.style.display="";tip.innerHTML=`<b>${esc(fmt(p[1]))}</b> · ${esc(new Date(p[0]).toLocaleString([],{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}`;
+      const tx=px*r.width/W;tip.style.left=Math.max(0,Math.min(r.width-tip.offsetWidth,tx-tip.offsetWidth/2))+"px";
+    };
+    svg.onpointerleave=()=>{hov.style.display="none";tip.style.display="none";};
+  };
+  tabs.forEach(b=>b.onclick=()=>{range=b.dataset.r;draw();});
+  draw();
+  if(window.ResizeObserver){let w=box.clientWidth;new ResizeObserver(()=>{if(box.clientWidth!==w){w=box.clientWidth;draw();}}).observe(box);}
+}
+
 async function viewToken(id){
   app.innerHTML=`<div class="wrap"><div class="page-h"><p>Loading token…</p></div></div>`;
   const t=await api.token(id);
   if(!t){app.innerHTML=`<div class="wrap"><div class="page-h"><h1>Token not found</h1><p>Check the link, or <a href="#/tokens">browse all launches</a>.</p></div></div>`;return;}
-  const [pays,board]=await Promise.all([api.payouts(id),api.leaderboard(id)]);
+  const [pays,board,chart]=await Promise.all([api.payouts(id),api.leaderboard(id),api.chart(id)]);
+  const ponsPage=/^0x[0-9a-fA-F]{40}$/.test(t.address||"")?"https://www.ponsfamily.com/launchpad/"+t.address:"";
   const postText=`$${t.ticker} ${t.address}`;
   app.innerHTML=`<div class="wrap">
     <div class="page-h"><div class="tokhead">${tokenIcon(t,"ic tok-ic")}<div><h1 style="margin:0">${esc(t.name)}</h1><p>$${esc(t.ticker)} <span class="pair">on Pons</span> <span class="pair">top ${esc(t.topN)} paid every ${esc(t.schedule)}</span> ${t.feeWallet&&t.feesLocked!==false?`<span class="lockbadge" title="Creator fees go to a wallet only $SHILL controls"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Fees locked</span>`:""}</p></div></div>
@@ -1222,6 +1275,9 @@ async function viewToken(id){
       ${CONFIG.PONS_URL?`<a class="btn sm" href="${esc(CONFIG.PONS_URL)}" target="_blank" rel="noopener">Trade on Pons</a>`:""}
       <a class="btn sm" href="${esc(CONFIG.EXPLORER)}/token/${esc(t.address)}" target="_blank" rel="noopener">View on explorer</a>${t.dexUrl?`<a class="btn sm" href="${esc(t.dexUrl)}" target="_blank" rel="noopener">View on DexScreener</a>`:""}</div></div>
     ${t.progress!=null&&!t.graduated?`<div class="grad"><div class="row"><span>Graduation progress on Pons</span><b>${Math.round(t.progress*100)}%</b></div><div class="meter"><i style="width:${Math.min(100,t.progress*100)}%"></i></div><span class="m" style="font-size:13px">When the bonding curve sells out, the token moves to a permanently locked Uniswap pool.</span></div>`:t.graduated?`<div class="grad"><div class="row"><span>Graduated on Pons</span><b class="up">100%</b></div><div class="meter"><i style="width:100%"></i></div></div>`:""}
+    <div class="chart"><div class="bar"><div class="now">${t.mcap>0&&t.price>0?"Market cap":"Price"}<b id="pcNow">—</b><span id="pcChg"></span></div><div class="tabs" id="pcRange"><button class="tab" data-r="1">24h</button><button class="tab" data-r="7">7d</button><button class="tab" data-r="all">All</button></div></div>
+      <div class="pcbox" id="pcBox"></div>
+      <div class="pcfoot"><span class="m" style="font-size:13px">Recorded by $SHILL every 15 minutes.${ponsPage?" For live candles and trades, open the full chart on Pons.":""}</span>${ponsPage?`<a class="btn sm" href="${esc(ponsPage)}" target="_blank" rel="noopener">Open chart on Pons</a>`:""}</div></div>
     <div class="stats"><div><span>Market cap</span><b>${usd(t.mcap)}</b></div><div><span>Tracked posts</span><b>${num(t.posts)}</b></div><div><span>Shillers</span><b>${num(t.shillers)}</b></div><div><span>Paid to shillers</span><b>${usd(t.paid)}</b></div></div>
     <div class="two" style="margin-bottom:24px">
       <div class="panel"><h3>Start earning</h3><p class="sub">Post about $${esc(t.ticker)} on X and mention its ticker or contract address. The tracker picks it up automatically.</p>
@@ -1238,6 +1294,7 @@ async function viewToken(id){
     ${boardTable(board,t.topN)}
     <div class="panel" style="margin:24px 0 80px"><h3>Payout history</h3><p class="sub">Every X Money payout for this token.</p><ul class="list">${payoutList(pays)}</ul></div>
   </div>`;
+  priceChart(t,chart);
   $("#cpAddr").onclick=()=>copy(t.address);
   $("#cpPost").onclick=()=>copy(postText);
   $("#subBtn").onclick=async()=>{

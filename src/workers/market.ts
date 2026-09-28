@@ -125,6 +125,10 @@ async function dexMarket(tokens: T[]) {
              price_usd=EXCLUDED.price_usd, liquidity_usd=EXCLUDED.liquidity_usd, pair_url=EXCLUDED.pair_url, source='dexscreener', updated_at=now()`,
           [byAddr.get(addr)!.id, main.marketCap ?? main.fdv ?? 0, main.priceChange?.h24 ?? 0,
            ps.reduce((s, p) => s + (p.volume?.h24 ?? 0), 0), Number(main.priceUsd ?? 0), main.liquidity?.usd ?? 0, main.url]);
+        // keep the token page chart going after graduation (snapshot every 15 minutes, like the curve)
+        const id = byAddr.get(addr)!.id, price = Number(main.priceUsd ?? 0);
+        const last = await one<{ recent: boolean }>("SELECT max(at) > now() - interval '15 minutes' AS recent FROM price_history WHERE launch_id=$1", [id]);
+        if (!last?.recent && price > 0) await q("INSERT INTO price_history (launch_id, price_usd) VALUES ($1,$2) ON CONFLICT DO NOTHING", [id, price]);
       }
     } catch (e) {
       log.warn("dexscreener fetch failed", { error: errMsg(e) });

@@ -117,6 +117,14 @@ async function payoutsFor(launchId?: string) {
 route("GET", "/payouts", () => cached("payouts", 30_000, () => payoutsFor()));
 route("GET", "/tokens/:id/payouts", ({ params }) => cached(`payouts:${params.id}`, 30_000, () => payoutsFor(params.id)));
 
+// Price chart: the market worker's 15-minute price snapshots, last 30 days, as [ms, priceUsd] pairs.
+route("GET", "/tokens/:id/chart", ({ params }) =>
+  cached(`chart:${params.id}`, 60_000, async () =>
+    (await q<{ at: Date; price_usd: number }>(
+      "SELECT at, price_usd FROM price_history WHERE launch_id = $1 AND at > now() - interval '30 days' ORDER BY at",
+      [params.id],
+    )).map((r) => [new Date(r.at).getTime(), Number(r.price_usd)])));
+
 route("GET", "/stats", () =>
   cached("stats", 30_000, async () => {
     const r = await one<{ paid: number; posts: string; launches: string; burned_raw: string }>(`
