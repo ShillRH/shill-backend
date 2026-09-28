@@ -117,7 +117,7 @@ async function payoutsFor(launchId?: string) {
 route("GET", "/payouts", () => cached("payouts", 30_000, () => payoutsFor()));
 route("GET", "/tokens/:id/payouts", ({ params }) => cached(`payouts:${params.id}`, 30_000, () => payoutsFor(params.id)));
 
-// Price chart: the market worker's 15-minute price snapshots, last 30 days, as [ms, priceUsd] pairs.
+// Price chart: the market worker's 5-minute price snapshots, last 30 days, as [ms, priceUsd] pairs.
 route("GET", "/tokens/:id/chart", ({ params }) =>
   cached(`chart:${params.id}`, 60_000, async () =>
     (await q<{ at: Date; price_usd: number }>(

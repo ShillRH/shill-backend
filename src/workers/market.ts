@@ -86,8 +86,8 @@ async function curveMarket(t: T, curve: Address, phase: number, head: bigint, se
   const vol = await one<{ raw: string }>("SELECT COALESCE(SUM(quote_raw),0) AS raw FROM curve_trades WHERE launch_id=$1 AND at > now() - interval '24 hours'", [t.id]);
   const volumeUsd = Number(formatUnits(BigInt(vol?.raw ?? "0"), 18)) * quoteUsd;
 
-  // 24h change from our own price history (snapshot every 15 minutes)
-  const last = await one<{ recent: boolean }>("SELECT max(at) > now() - interval '15 minutes' AS recent FROM price_history WHERE launch_id=$1", [t.id]);
+  // 24h change from our own price history (snapshot every 5 minutes)
+  const last = await one<{ recent: boolean }>("SELECT max(at) > now() - interval '5 minutes' AS recent FROM price_history WHERE launch_id=$1", [t.id]);
   if (!last?.recent && priceUsd > 0) await q("INSERT INTO price_history (launch_id, price_usd) VALUES ($1,$2) ON CONFLICT DO NOTHING", [t.id, priceUsd]);
   const old = await one<{ price_usd: number }>(
     "SELECT price_usd FROM price_history WHERE launch_id=$1 AND at <= now() - interval '23 hours' ORDER BY at DESC LIMIT 1", [t.id]);
@@ -125,9 +125,9 @@ async function dexMarket(tokens: T[]) {
              price_usd=EXCLUDED.price_usd, liquidity_usd=EXCLUDED.liquidity_usd, pair_url=EXCLUDED.pair_url, source='dexscreener', updated_at=now()`,
           [byAddr.get(addr)!.id, main.marketCap ?? main.fdv ?? 0, main.priceChange?.h24 ?? 0,
            ps.reduce((s, p) => s + (p.volume?.h24 ?? 0), 0), Number(main.priceUsd ?? 0), main.liquidity?.usd ?? 0, main.url]);
-        // keep the token page chart going after graduation (snapshot every 15 minutes, like the curve)
+        // keep the token page chart going after graduation (snapshot every 5 minutes, like the curve)
         const id = byAddr.get(addr)!.id, price = Number(main.priceUsd ?? 0);
-        const last = await one<{ recent: boolean }>("SELECT max(at) > now() - interval '15 minutes' AS recent FROM price_history WHERE launch_id=$1", [id]);
+        const last = await one<{ recent: boolean }>("SELECT max(at) > now() - interval '5 minutes' AS recent FROM price_history WHERE launch_id=$1", [id]);
         if (!last?.recent && price > 0) await q("INSERT INTO price_history (launch_id, price_usd) VALUES ($1,$2) ON CONFLICT DO NOTHING", [id, price]);
       }
     } catch (e) {

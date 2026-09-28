@@ -775,7 +775,7 @@ legend+*{clear:both}
 .pcbox{position:relative;height:240px}.pcbox svg{display:block;width:100%;height:100%;touch-action:pan-y}
 .pcbox .emp{height:100%;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:14px;padding:0 20px}
 .pctip{position:absolute;top:0;pointer-events:none;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:4px 8px;font-size:12px;white-space:nowrap;color:var(--muted)}.pctip b{color:var(--text);font-weight:600}
-.pcfoot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.pcfoot{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -1216,7 +1216,7 @@ async function viewLeaderboard(){
 }
 
 /* ---------- token price chart ---------- */
-function demoChart(){const out=[],now=Date.now();let p=0.00002;for(let i=7*96;i>=0;i--){p*=1+(Math.random()-.47)*.04;out.push([now-i*9e5,p]);}return out;}
+function demoChart(){const out=[],now=Date.now();let p=0.00002;for(let i=7*288;i>=0;i--){p*=1+(Math.random()-.47)*.02;out.push([now-i*3e5,p]);}return out;}
 const tinyUsd=n=>n>=0.01?usd(n):"$"+n.toPrecision(3);
 function priceChart(t,raw){
   // Plot market cap when we know the supply (mcap / price), otherwise the raw price.
@@ -1232,7 +1232,7 @@ function priceChart(t,raw){
     $("#pcNow").textContent=last?fmt(last[1]):"—";
     const chg=d.length>1?(d[d.length-1][1]-d[0][1])/d[0][1]*100:null;
     $("#pcChg").innerHTML=chg==null?"":`<span class="${chg>=0?"up":"down"}">${chg>=0?"+":""}${chg.toFixed(1)}%</span>`;
-    if(d.length<2){box.innerHTML=`<div class="emp">Not enough price data yet. The chart fills in as the tracker records the price every 15 minutes.</div>`;return;}
+    if(d.length<2){box.innerHTML=`<div class="emp">Chart data is on its way. Check back in a few minutes.</div>`;return;}
     const W=box.clientWidth||600,H=box.clientHeight||240,L=64,R=8,T=10,B=24;
     let lo=Math.min(...d.map(p=>p[1])),hi=Math.max(...d.map(p=>p[1]));if(hi===lo){hi*=1.05;lo*=.95;}
     const t0=d[0][0],t1=d[d.length-1][0],x=v=>L+(v-t0)/(t1-t0||1)*(W-L-R),y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
@@ -1277,7 +1277,7 @@ async function viewToken(id){
     ${t.progress!=null&&!t.graduated?`<div class="grad"><div class="row"><span>Graduation progress on Pons</span><b>${Math.round(t.progress*100)}%</b></div><div class="meter"><i style="width:${Math.min(100,t.progress*100)}%"></i></div><span class="m" style="font-size:13px">When the bonding curve sells out, the token moves to a permanently locked Uniswap pool.</span></div>`:t.graduated?`<div class="grad"><div class="row"><span>Graduated on Pons</span><b class="up">100%</b></div><div class="meter"><i style="width:100%"></i></div></div>`:""}
     <div class="chart"><div class="bar"><div class="now">${t.mcap>0&&t.price>0?"Market cap":"Price"}<b id="pcNow">—</b><span id="pcChg"></span></div><div class="tabs" id="pcRange"><button class="tab" data-r="1">24h</button><button class="tab" data-r="7">7d</button><button class="tab" data-r="all">All</button></div></div>
       <div class="pcbox" id="pcBox"></div>
-      <div class="pcfoot"><span class="m" style="font-size:13px">Recorded by $SHILL every 15 minutes.${ponsPage?" For live candles and trades, open the full chart on Pons.":""}</span>${ponsPage?`<a class="btn sm" href="${esc(ponsPage)}" target="_blank" rel="noopener">Open chart on Pons</a>`:""}</div></div>
+      ${ponsPage?`<div class="pcfoot"><a class="btn sm" href="${esc(ponsPage)}" target="_blank" rel="noopener">Open chart on Pons</a></div>`:""}</div>
     <div class="stats"><div><span>Market cap</span><b>${usd(t.mcap)}</b></div><div><span>Tracked posts</span><b>${num(t.posts)}</b></div><div><span>Shillers</span><b>${num(t.shillers)}</b></div><div><span>Paid to shillers</span><b>${usd(t.paid)}</b></div></div>
     <div class="two" style="margin-bottom:24px">
       <div class="panel"><h3>Start earning</h3><p class="sub">Post about $${esc(t.ticker)} on X and mention its ticker or contract address. The tracker picks it up automatically.</p>
