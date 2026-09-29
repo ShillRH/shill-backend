@@ -818,7 +818,7 @@ legend+*{clear:both}
 const CONFIG = {
   BRAND: "SHILL",
   TICKER: "SHILL",
-  CONTRACT: "",                        // $SHILL contract address, shown in the top strip
+  CONTRACT: "0x68cf688a4b23b87f8f016138b758cc336de78e28",  // $SHILL contract address, shown in the top strip
   X_URL: "https://x.com/SHILL_RH",
   PONS_URL: "",                        // Pons launchpad link (hidden while empty)
   EXPLORER: "https://robinhoodchain.blockscout.com",   // Robinhood Chain's official explorer
@@ -2187,7 +2187,7 @@ function route(){
 (function boot(){
   document.querySelectorAll("#brand,.brandName").forEach(e=>e.textContent=CONFIG.BRAND);
   $("#strip").innerHTML = (CONFIG.CONTRACT
-    ? `CA: <code>${esc(CONFIG.CONTRACT)}</code><button id="cpCa">Copy</button><a href="${esc(CONFIG.EXPLORER)}/token/${esc(CONFIG.CONTRACT)}" target="_blank" rel="noopener">View on explorer</a>`
+    ? `CA: <code>${esc(CONFIG.CONTRACT)}</code><button id="cpCa">Copy</button><a href="${esc(CONFIG.EXPLORER)}/token/${esc(CONFIG.CONTRACT)}" target="_blank" rel="noopener">View on explorer</a><a href="https://www.ponsfamily.com/launchpad/${esc(CONFIG.CONTRACT)}" target="_blank" rel="noopener">Buy on Pons</a>`
     : `<span>$${esc(CONFIG.TICKER)} contract address goes live at launch.</span>`)
     + (CONFIG.DEMO?`<span class="sample">Showing sample data</span>`:"");
   $("#cpCa")&&($("#cpCa").onclick=()=>copy(CONFIG.CONTRACT));
