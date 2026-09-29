@@ -1,11 +1,12 @@
 // Post submission: no sign-in needed. A shiller pastes their X post link on a token page.
 // We read the post from X, check it mentions the token, and credit its author. The author's
 // X account is their $SHILL identity and payout destination (X Money), so submitting someone
-// else's post can only ever credit that person. After the first submission, the tracker also
-// finds that author's future posts automatically.
+// else's post can only ever credit that person. The tracker also finds posts on its own; this is
+// the backup for anything it missed.
 import { q, one } from "../db.js";
 import { config } from "../config.js";
 import { fetchXPost } from "../social/x.js";
+import { upsertXShiller } from "../social/xshillers.js";
 import { BudgetExceededError } from "../lib/budget.js";
 import { mentionsToken, realWordCount } from "../lib/text.js";
 import { SCORING } from "../scoring/scoring.js";
@@ -43,22 +44,13 @@ route("POST", "/tokens/:id/submit", async (ctx) => {
   if (realWordCount(p.text) < SCORING.minWords)
     throw new HttpError(400, `Posts need at least ${SCORING.minWords} real words besides the ticker or address to count.`);
 
-  const user = await one<{ id: string; banned: boolean }>(
-    `INSERT INTO users (x_user_id, x_handle) VALUES ($1,$2)
-     ON CONFLICT (x_user_id) DO UPDATE SET x_handle = EXCLUDED.x_handle RETURNING id, banned`,
-    [p.authorExternalId, p.authorUsername]);
-  if (!user) throw new Error("user upsert failed");
-  if (user.banned) throw new HttpError(403, "This account can't earn on $SHILL.");
-  await q(
-    `INSERT INTO linked_accounts (user_id, platform, handle, external_id, followers, account_created, verified_at)
-     VALUES ($1,'x',$2,$3,$4,$5, to_timestamp(0))
-     ON CONFLICT (user_id, platform) DO UPDATE SET handle=EXCLUDED.handle, followers=EXCLUDED.followers, account_created=EXCLUDED.account_created`,
-    [user.id, p.authorUsername, p.authorExternalId, p.authorFollowers, p.authorCreatedAt]);
+  const user = await upsertXShiller({ id: p.authorExternalId, username: p.authorUsername, followers: p.authorFollowers, createdAt: p.authorCreatedAt });
+  if (!user) throw new HttpError(403, "This account can't earn on $SHILL.");
   await q(
     `INSERT INTO posts (platform, external_id, launch_id, user_id, url, text, content_type, posted_at, likes, comments, shares, saves, views)
      VALUES ('x',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
     [p.externalId, t.id, user.id, p.url, p.text, p.contentType, p.postedAt,
      p.metrics.likes, p.metrics.comments, p.metrics.shares, p.metrics.saves, p.metrics.views]);
   return { ok: true, handle: p.authorUsername,
-    message: `Added. @${p.authorUsername}'s post now counts, and their future posts about $${t.ticker} are picked up automatically.` };
+    message: `Added. @${p.authorUsername}'s post now counts.` };
 });

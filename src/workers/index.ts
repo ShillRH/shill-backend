@@ -14,7 +14,7 @@ import { runDiscover } from "./discover.js";
 
 const jobs: { name: string; everyMs: number; lock: number; fn: () => Promise<void> }[] = [
   { name: "discover", everyMs: 4_000, lock: 1008, fn: runDiscover },  // new tokens appear within seconds
-  { name: "tracker", everyMs: 5 * 60_000, lock: 1002, fn: runTracker },
+  { name: "tracker", everyMs: 60_000, lock: 1002, fn: runTracker },   // new X posts show up within a minute or two
   { name: "trust", everyMs: 15 * 60_000, lock: 1003, fn: runTrust },
   { name: "cycles", everyMs: 60_000, lock: 1004, fn: runCycles },
   // shares the cycles lock: both move money from the fee wallet, so they never run at the same time

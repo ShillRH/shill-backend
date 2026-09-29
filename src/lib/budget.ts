@@ -2,10 +2,12 @@
 //
 // Prices (September 2026): $0.005 per post read, $0.010 per user read. Check X's pricing page and
 // update X_PRICES if they change. Spend is counted from what each response actually returned.
+// X bills each post and user once per UTC day however often it's read, so only the first read of an
+// id each day is counted (table x_billed).
 //
 // How the budget is shared:
 //   - Searching for new posts may use up to X_SEARCH_SHARE (80%) of the budget.
-//   - The last 20% is kept for refreshing engagement (so cycles can still settle) and sign-ins.
+//   - The last 20% is kept for refreshing engagement, so cycles can still settle with fresh numbers.
 //   - At 100%, every X call stops until the next month. Nothing is ever spent past the cap.
 
 import { q, one } from "../db.js";
@@ -42,8 +44,26 @@ export async function reserveX(estimate: number, purpose: Purpose): Promise<void
   }
 }
 
-/** Records what a call actually returned. */
-export async function chargeX(purpose: Purpose, postReads: number, userReads = 0): Promise<void> {
+const day = () => new Date().toISOString().slice(0, 10);
+
+/** Of these ids, the ones X hasn't billed us for yet today. Marks them billed. */
+async function firstReadsToday(kind: "post" | "user", ids: string[]): Promise<number> {
+  const uniq = [...new Set(ids)];
+  let fresh = 0;
+  for (let i = 0; i < uniq.length; i += 200) {
+    const part = uniq.slice(i, i + 200);
+    const rows = await q(
+      `INSERT INTO x_billed (day, kind, id) VALUES ${part.map((_, j) => `($1,$2,$${j + 3})`).join(",")}
+       ON CONFLICT DO NOTHING RETURNING id`, [day(), kind, ...part]);
+    fresh += rows.length;
+  }
+  return fresh;
+}
+
+/** Records what a call actually returned: the post ids and user ids X sent back. */
+export async function chargeX(purpose: Purpose, postIds: string[], userIds: string[] = []): Promise<void> {
+  const postReads = await firstReadsToday("post", postIds);
+  const userReads = await firstReadsToday("user", userIds);
   if (!postReads && !userReads) return;
   await q(
     `INSERT INTO api_usage (month, platform, purpose, post_reads, user_reads, cost_usd) VALUES ($1,'x',$2,$3,$4,$5)
@@ -53,6 +73,11 @@ export async function chargeX(purpose: Purpose, postReads: number, userReads = 0
   const spent = await xSpentThisMonth();
   const budget = xBudgetUsd();
   if (spent >= budget * 0.8) log.warn("X budget running low", { spent: Number(spent.toFixed(2)), budget });
+}
+
+/** Drops billing records from before yesterday (they no longer affect what X charges). */
+export async function pruneXBilled(): Promise<void> {
+  await q("DELETE FROM x_billed WHERE day < $1", [new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)]);
 }
 
 export async function xUsageSummary() {

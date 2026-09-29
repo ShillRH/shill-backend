@@ -13,7 +13,7 @@ Website ──HTTP──▶ API server (src/server.ts)
                  Postgres ◀── Worker (src/workers/index.ts)
                                 ├─ discover  every 4s   auto-list any Pons v2 token whose fees go to the fee wallet
                                 ├─ fees      every 10m  sweep each token's creator fees into the fee wallet, per token
-                                ├─ tracker   every 5m   find shill posts on each platform, refresh engagement
+                                ├─ tracker   every 1m   find new X posts about any token, refresh engagement every 5m
                                 ├─ trust     every 15m  recompute trust scores
                                 ├─ cycles    every 1m   sweep + claim → rank → split 80/20 → move funds → queue payouts
                                 ├─ payouts   every 5m   send queued payouts (when an automated provider is set)
@@ -62,7 +62,8 @@ cap, moderation and the fee wallet safety check (87 checks).
   per-cycle crediting so each cycle only pays for new engagement.
 - Trust score with every published signal, trust levels, and protection for established accounts.
 - Cycles on a fixed grid from launch, the 80/20 split, top-N payouts by points, small-payout carry-over.
-- Post submission with no sign-in: shillers paste an X post link, and the post's author is credited and tracked from then on.
+- Automatic X tracking with no sign-in: any public post that mentions a token's $TICKER or contract address is
+  found within a minute or two and credited to its author. Pasting a post link on the token page is a backup.
 - Market data read straight from the Pons contracts before graduation (price, market cap, graduation progress, 24h volume and change), DexScreener after graduation, holders from Blockscout, ETH price from DeFiLlama.
 - Pons v2 launching and fee claiming, using the functions published in the official Pons docs.
 - Adding tokens launched elsewhere (like $SHILL via Proxima) and settling their cycles from fees you claim yourself.
@@ -143,19 +144,31 @@ When a cycle ends it shows up in `GET /admin/cycles`. Then:
 
 ## X API spending cap
 
-X bills per request ($0.005 per post read, $0.010 per user read as of September 2026). The backend
-enforces a hard monthly cap, `X_MONTHLY_BUDGET_USD` (default **$50**):
+X bills per resource read ($0.005 per post, $0.010 per user as of September 2026), and each post or user
+is billed **once per UTC day** however many times it's read that day. The backend enforces a hard monthly
+cap, `X_MONTHLY_BUDGET_USD` (default **$50**):
 
 - Every X call is checked against the cap **before** it's made, and charged for what it actually returned.
-- New-post searches stop at 80% of the cap. The last 20% is kept for engagement checks and sign-ins,
-  so cycles can still settle with fresh numbers.
+  Ids already read today aren't counted again, matching X's billing.
+- New-post searches stop at 80% of the cap. The last 20% is kept for engagement checks, so cycles can
+  still settle with fresh numbers.
 - At 100%, all X calls stop until the next month. Cycles still settle using the last numbers fetched.
-- Cost controls built in: searches only look for posts from linked accounts, each search starts after
-  the newest post already seen, and engagement is re-checked less often as posts age.
-- Check spend any time at `GET /admin/usage`.
 
-Rough guide: each tracked post costs about $0.05–0.10 over its life, so $50 covers roughly 500–1,000
-tracked posts a month. Set the same limit in X's Developer Console as a second safety net.
+How tracking spends it:
+
+- Every minute, the tracker searches X for any post (retweets excluded) that mentions a live token's
+  `$TICKER` or contract address. Several tokens share one query, and each search starts after the newest
+  post already seen, so each post is paid for once. Authors become shillers automatically.
+- Posts with fewer than 5 real words, or made before the token launched, are read (and billed) but not tracked.
+- Engagement on every tracked post is re-checked every `X_REFRESH_MINUTES` (default 5) for 7 days. Because
+  of X's once-a-day billing, that costs about $0.005 per post per day.
+
+Rough guide: a tracked post costs about $0.04 over its 7 days, plus $0.01 per new author per day and
+$0.005 for every junk post read (bots, other coins with the same ticker). Set the same limit in X's
+Developer Console as a second safety net, and turn off auto-recharge on your credits.
+
+Tuning: `X_REFRESH_MINUTES`, `X_SEARCH_MAX_PAGES` (pages of 100 posts per query per run, default 5),
+`X_QUERY_MAX_LEN` (default 512). Check spend any time at `GET /admin/usage`.
 
 ## Money safety
 

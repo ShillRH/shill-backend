@@ -1,19 +1,23 @@
-// Finds new shill posts on every enabled platform and keeps their engagement up to date,
-// while keeping paid API usage low:
-//  - only posts from linked $SHILL accounts are searched for (X supports author filters)
-//  - each search starts after the newest post already seen (since_id)
-//  - engagement is re-checked less often as posts age:
-//      under 6 hours old -> every hour
-//      6 to 48 hours     -> every 6 hours
-//      2 to 7 days       -> once a day
-//    plus one final check just before each cycle settles (see refreshLaunchPosts)
+// Finds new shill posts on every enabled platform and keeps their engagement up to date.
+//  - X: every run (each minute) searches for ANY public post that mentions a live token's $TICKER or
+//    contract address, from anyone. Authors become shillers automatically; no link or sign-up needed.
+//    Several tokens share one query, and each search starts after the newest post already seen.
+//  - Engagement on every tracked post is re-checked every X_REFRESH_MINUTES (default 5) for its
+//    7-day window, plus one final check just before each cycle settles (see refreshLaunchPosts).
+//    X bills a post once per UTC day however often it's read, so frequent refreshes stay cheap.
+//  - Other platforms only track accounts that are already linked.
 import { q, one } from "../db.js";
 import { enabledAdapters, type SocialAdapter } from "../social/index.js";
-import { mentionsToken } from "../lib/text.js";
+import { searchX, type XFound } from "../social/x.js";
+import { packQueries, tokenTerm } from "../social/xquery.js";
+import { upsertXShiller } from "../social/xshillers.js";
+import { mentionsToken, realWordCount } from "../lib/text.js";
 import { SCORING } from "../scoring/scoring.js";
-import { BudgetExceededError } from "../lib/budget.js";
+import { BudgetExceededError, pruneXBilled } from "../lib/budget.js";
 import { log, errMsg } from "../lib/log.js";
 import { config } from "../config.js";
+
+const REFRESH_MINUTES = Math.max(1, Math.round(Number(process.env.X_REFRESH_MINUTES ?? 5)) || 5);
 
 interface Live { id: string; ticker: string; token_address: string; launched_at: Date }
 interface Linked { external_id: string; handle: string; user_id: string; verified_at: Date }
@@ -22,7 +26,8 @@ export async function runTracker() {
   const live = await q<Live>("SELECT id, ticker, token_address, launched_at FROM launches WHERE status='live'");
   for (const adapter of enabledAdapters()) {
     try {
-      await searchPlatform(adapter, live);
+      if (adapter.platform === "x") { await pruneXBilled(); await searchXAll(live); }
+      else await searchPlatform(adapter, live);
       await refreshDue(adapter);
     } catch (e) {
       if (e instanceof BudgetExceededError) log.info("tracker paused by budget", { platform: adapter.platform, reason: e.message });
@@ -31,6 +36,68 @@ export async function runTracker() {
   }
 }
 
+/** X: open search for every live token, packed into as few queries as fit. */
+async function searchXAll(live: Live[]) {
+  const items = live.flatMap((t) => { const term = tokenTerm(t.ticker, t.token_address); return term ? [{ key: t, term }] : []; });
+  if (!items.length) return;
+  const states = new Map((await q<{ launch_id: string; since_id: string | null }>(
+    "SELECT launch_id, since_id FROM tracker_state WHERE platform='x'")).map((r) => [r.launch_id, r.since_id]));
+  const shillers = new Map<string, string | null>(); // X user id -> shiller id (null = banned), per run
+
+  for (const { query, keys: tokens } of packQueries(items)) {
+    try {
+      // Start after the oldest "newest seen" in the group. A token with no history yet starts from
+      // its launch (at most 24 hours back). Posts read again the same day aren't billed again.
+      const ids = tokens.map((t) => states.get(t.id) ?? null);
+      const sinceId = ids.every(Boolean) ? ids.reduce((a, b) => (BigInt(a!) < BigInt(b!) ? a : b))! : undefined;
+      const startTime = new Date(Math.min(...tokens.map((t) => Math.max(new Date(t.launched_at).getTime(), Date.now() - 24 * 3600_000))));
+      const { posts, newestId } = await searchX(query, sinceId ? { sinceId } : { startTime });
+
+      let added = 0;
+      for (const p of posts) added += await addXPost(p, tokens, shillers);
+      if (newestId) {
+        for (const t of tokens) {
+          const prev = states.get(t.id);
+          if (prev && BigInt(prev) >= BigInt(newestId)) continue;
+          await q(`INSERT INTO tracker_state (platform, launch_id, since_id) VALUES ('x',$1,$2)
+                   ON CONFLICT (platform, launch_id) DO UPDATE SET since_id=EXCLUDED.since_id, updated_at=now()`, [t.id, newestId]);
+        }
+      }
+      if (added) log.info("new posts", { platform: "x", tokens: tokens.map((t) => t.id), added });
+    } catch (e) {
+      if (e instanceof BudgetExceededError) throw e;
+      log.warn("search failed", { platform: "x", tokens: tokens.map((t) => t.id), error: errMsg(e) });
+    }
+  }
+}
+
+/** Files one found X post under every token in the group it qualifies for. Returns how many were added. */
+async function addXPost(p: XFound, tokens: Live[], shillers: Map<string, string | null>): Promise<number> {
+  if (!p.author) return 0;
+  if (realWordCount(p.text) < SCORING.minWords) return 0;                     // same bar as submitted posts
+  if (Date.now() - p.postedAt.getTime() > SCORING.engagementWindowDays * 86_400_000) return 0;
+  const matches = tokens.filter((t) => p.postedAt >= new Date(t.launched_at)
+    && mentionsToken(p.text, t.ticker, t.token_address, `${config.frontendOrigin}/#/token/${t.id}`));
+  if (!matches.length) return 0;
+
+  if (!shillers.has(p.author.id)) shillers.set(p.author.id, (await upsertXShiller(p.author))?.id ?? null);
+  const userId = shillers.get(p.author.id);
+  if (!userId) return 0; // banned
+
+  let added = 0;
+  for (const t of matches) {
+    const r = await q(
+      `INSERT INTO posts (platform, external_id, launch_id, user_id, url, text, content_type, posted_at, likes, comments, shares, saves, views)
+       VALUES ('x',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (platform, external_id, launch_id) DO NOTHING RETURNING id`,
+      [p.externalId, t.id, userId, p.url, p.text, p.contentType, p.postedAt,
+       p.metrics.likes, p.metrics.comments, p.metrics.shares, p.metrics.saves, p.metrics.views]);
+    added += r.length;
+  }
+  return added;
+}
+
+/** Other platforms: only posts from accounts that are already linked. */
 async function searchPlatform(adapter: SocialAdapter, live: Live[]) {
   const linked = await q<Linked>(
     `SELECT la.external_id, la.handle, la.user_id, la.verified_at FROM linked_accounts la JOIN users u ON u.id = la.user_id
@@ -83,14 +150,11 @@ async function searchPlatform(adapter: SocialAdapter, live: Live[]) {
 
 const WINDOW = `interval '${SCORING.engagementWindowDays} days'`;
 const DUE_SQL = `
-  NOT deleted AND posted_at > now() - ${WINDOW} AND (
-       (posted_at > now() - interval '6 hours'  AND last_fetched_at < now() - interval '1 hour')
-    OR (posted_at <= now() - interval '6 hours' AND posted_at > now() - interval '48 hours' AND last_fetched_at < now() - interval '6 hours')
-    OR (posted_at <= now() - interval '48 hours' AND last_fetched_at < now() - interval '24 hours'))`;
+  NOT deleted AND posted_at > now() - ${WINDOW} AND last_fetched_at < now() - interval '${REFRESH_MINUTES} minutes'`;
 
 async function refreshDue(adapter: SocialAdapter) {
   const rows = await q<{ id: string; external_id: string }>(
-    `SELECT id, external_id FROM posts WHERE platform = $1 AND ${DUE_SQL} ORDER BY posted_at DESC LIMIT 1000`, [adapter.platform]);
+    `SELECT id, external_id FROM posts WHERE platform = $1 AND ${DUE_SQL} ORDER BY last_fetched_at LIMIT 1000`, [adapter.platform]);
   await applyRefresh(adapter, rows);
 }
 

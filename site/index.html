@@ -1284,7 +1284,7 @@ async function viewToken(id){
         <div class="addr" style="margin-bottom:10px">${esc(postText)}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="cpPost">Copy ticker and CA</button><a class="btn sm solid" target="_blank" rel="noopener" href="https://x.com/intent/tweet?text=${encodeURIComponent(postText)}">Post on X</a></div>
         <p class="note">Rewards are sent to your X account through X Money, so there's no wallet to link or account to sign in to.</p>
-        <div class="field" style="margin-top:18px"><label for="sub">Already posted? Submit your post</label><input class="in" id="sub" placeholder="https://x.com/you/status/…" autocomplete="off" spellcheck="false"><span class="hint">Submit once and your future posts about $${esc(t.ticker)} are picked up automatically.</span></div>
+        <div class="field" style="margin-top:18px"><label for="sub">Post not showing up? Submit it here</label><input class="in" id="sub" placeholder="https://x.com/you/status/…" autocomplete="off" spellcheck="false"><span class="hint">Posts that mention $${esc(t.ticker)} or its contract address show up automatically within a few minutes. Use this if one is missing.</span></div>
         <button class="btn" id="subBtn">Submit post</button><div id="smsg" role="status"></div></div>
       <div class="panel"><h3>Check your points</h3><p class="sub">See where you stand this cycle.</p>
         <div class="field"><label for="jx">X handle</label><input class="in" id="jx" placeholder="@yourhandle" autocomplete="off"></div>
@@ -1794,7 +1794,7 @@ function viewDocs(anchor){
       <h2>Quick start</h2>
       <h3>For shillers</h3>
       <ol class="steps2">
-        <li><b>Sign in with X</b>Your X account is your $SHILL profile and where your payouts go.</li>
+        <li><b>No sign-up</b>Your X account is your $SHILL profile and where your payouts go.</li>
         <li><b>Link your other platforms</b>Optional, but every linked platform adds to the same score.</li>
         <li><b>Post about a token</b>Mention its $TICKER or contract address, or link to its page.</li>
         <li><b>Watch your rank</b>The token's leaderboard updates as engagement comes in.</li>
@@ -1902,7 +1902,7 @@ function viewDocs(anchor){
       <p>A post counts when all of these are true:</p>
       <ul>
         <li>It mentions the token's <code>$TICKER</code> or contract address, or links to its page.</li>
-        <li>It's public, from a linked account, and posted after the token launched.</li>
+        <li>It's public and posted after the token launched.</li>
         <li>It has at least ${S.minWords} real words besides the ticker or address.</li>
         <li>It stays up. Deleted or removed posts lose their points.</li>
       </ul>
@@ -2108,14 +2108,14 @@ function viewDocs(anchor){
     <section class="dx-sec" id="faq">
       <h2>FAQ</h2>
       ${[
-        ["Do I need to hold the token to earn?","No. Anyone with a linked X account can shill any token and earn."],
+        ["Do I need to hold the token to earn?","No. Anyone with an X account can shill any token and earn."],
         ["Do I need to connect a wallet?","Shillers don't: they're paid through X Money. Launchers connect the wallet they pay from."],
         ["Who controls the launch wallet?","You do. It's opened by your connected wallet's signature, and the key never leaves your browser. The creator fees still go to the $SHILL fee wallet, which your launch wallet can't change."],
         ["Is this a real Pons token?","Yes. It's deployed through Pons V2 on Robinhood Chain with the standard bonding curve, and graduates to a locked Uniswap v4 pool."],
         ["Which platform earns the most?","None. Points work the same everywhere. Video gets a bigger content bonus because it takes more effort."],
         ["How is my cut decided?","By points. Your share is your points divided by the total points of everyone in the paid spots."],
         ["How often are payouts?","Whatever the launcher chose: every 1, 4, 12 or 24 hours, or every 7 days, on a fixed clock from launch."],
-        ["Why didn't my post count?","Check that it names the ticker or contract address, has at least 5 real words, is public, came from a linked account and was posted after launch."],
+        ["Why didn't my post count?","Check that it names the ticker or contract address, has at least 5 real words, is public and was posted after launch. Tracking picks posts up within a few minutes; if one is still missing, paste its link on the token page."],
         ["What does Watch or Limited next to my name mean?","The anti-bot system found something that lowers your trust score. It clears on its own when the behavior stops."],
         ["What if nobody trades the token?","Payouts come from creator fees. No trades means no fees and no payout that cycle."],
         ["Can the launcher change the settings later?","No. Pair, creator fee, paid spots and cycle are locked at launch, and the fees stay locked to the launch wallet."],

@@ -48,9 +48,13 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const u = new URL(url);
     if (u.pathname === "/2/tweets/search/recent") {
       const q = u.searchParams.get("query") ?? "", since = u.searchParams.get("since_id");
-      const handles = [...q.matchAll(/from:(\w+)/g)].map((m) => m[1]!.toLowerCase());
-      const data = [...xTweets.values()].filter((t) => handles.includes(xUsers.get(t.author_id)!.username.toLowerCase()) && (!since || BigInt(t.id) > BigInt(since)));
-      return json({ data, meta: { result_count: data.length } });
+      // like X: match any post (from anyone) containing one of the query's cashtags or quoted contract addresses
+      const tags = [...q.matchAll(/\$([A-Za-z0-9_]+)/g)].map((m) => new RegExp(`\\$${m[1]}(?![A-Za-z0-9_])`, "i"));
+      const cas = [...q.matchAll(/"(0x[0-9a-fA-F]{40})"/g)].map((m) => m[1]!.toLowerCase());
+      const data = [...xTweets.values()].filter((t) => (tags.some((re) => re.test(t.text)) || cas.some((c) => t.text.toLowerCase().includes(c)))
+        && (!since || BigInt(t.id) > BigInt(since))).sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
+      const users = [...new Set(data.map((t) => t.author_id))].map((id) => xUsers.get(id)).filter(Boolean);
+      return json({ data, includes: { users }, meta: { result_count: data.length, newest_id: data[0]?.id } });
     }
     if (u.pathname === "/2/tweets") {
       const ids = (u.searchParams.get("ids") ?? "").split(",");
@@ -114,7 +118,7 @@ await step("migrations apply cleanly", async () => {
   for (const t of ["launches", "users", "posts", "cycles", "payouts", "fee_ledger", "fee_wallet_state", "discovery_state", "api_usage", "tracker_state", "token_market", "curve_trades"])
     check(`table ${t} exists`, tables.includes(t), tables);
   const applied = rawDb.prepare("SELECT count(*) AS n FROM schema_migrations").get() as { n: number };
-  check("all 7 migration files recorded", Number(applied.n) === 7, applied);
+  check("all 8 migration files recorded", Number(applied.n) === 8, applied);
 });
 
 // ============================================================================================
@@ -245,7 +249,7 @@ await step("submit posts", async () => {
 });
 
 // ============================================================================================
-sec("8. Tracker finds follow-up posts; engagement refresh");
+sec("8. Tracker finds posts automatically; engagement refresh");
 const { runTracker } = await import("../../src/workers/tracker.ts");
 await step("automatic tracking", async () => {
   mkTweet("1800000000000000010", "102", "Second thread on $RDOG: why the creator fees model works so well", 2, { like_count: 60, reply_count: 12, retweet_count: 6 });
@@ -253,14 +257,32 @@ await step("automatic tracking", async () => {
   const before = xCalls.length;
   await runTracker();
   const n = (rawDb.prepare("SELECT count(*) AS n FROM posts").get() as { n: number }).n;
-  check("new post by a known shiller found automatically (3 posts tracked)", Number(n) === 3, n);
-  const q = xCalls.slice(before).find((u) => u.includes("search/recent")) ?? "";
-  check("search only asks for known shillers (from: filter)", decodeURIComponent(q).includes("from:degenmaya") && decodeURIComponent(q).includes("from:chartgoblin"), q);
+  check("new post found automatically; short and off-topic posts skipped (3 posts tracked)", Number(n) === 3, n);
+  const q = decodeURIComponent(xCalls.slice(before).find((u) => u.includes("search/recent")) ?? "");
+  check("search is open to everyone (no from: filter) and covers ticker + contract address",
+    !q.includes("from:") && q.includes("$RDOG") && q.includes(rawDb.prepare("SELECT token_address FROM launches WHERE id='rdog'").get().token_address), q);
+  const searches = xCalls.slice(before).filter((u) => u.includes("search/recent")).length;
+  const live = Number(rawDb.prepare("SELECT count(*) AS n FROM launches WHERE status='live'").get().n);
+  check(`all ${live} live tokens searched in ${searches} request(s)`, live > 1 && searches === 1, { live, searches });
+  // someone who never submitted anything posts about the token: they're found and become a shiller
+  mkUser("104", "newcomer_nina", 700, 300);
+  mkTweet("1800000000000000012", "104", "Just found $RDOG and honestly this community is something else", 1, { like_count: 3 });
+  await runTracker();
+  const nina = rawDb.prepare("SELECT p.url, u.x_handle FROM posts p JOIN users u ON u.id = p.user_id WHERE p.external_id='1800000000000000012'").get();
+  check("post from a brand-new account found with no submission", nina?.x_handle === "newcomer_nina" && nina.url === "https://x.com/newcomer_nina/status/1800000000000000012", nina);
+  // keep the rest of the simulation's numbers as they were
+  rawDb.prepare("DELETE FROM posts WHERE external_id='1800000000000000012'").run(); xTweets.delete("1800000000000000012");
   const t1 = xTweets.get("1800000000000000001")!; t1.public_metrics.like_count = 450;
-  rawDb.prepare("UPDATE posts SET last_fetched_at = ?").run(new Date(now - 2 * 36e5).toISOString());
+  const reads = () => Number(rawDb.prepare("SELECT COALESCE(SUM(post_reads),0) AS n FROM api_usage").get().n);
+  const readsBefore = reads();
+  rawDb.prepare("UPDATE posts SET last_fetched_at = ?").run(new Date(now - 6 * 6e4).toISOString());  // 6 minutes ago
   await runTracker();
   const likes = (rawDb.prepare("SELECT likes FROM posts WHERE external_id='1800000000000000001'").get() as { likes: number }).likes;
-  check("engagement refreshed (450 likes)", Number(likes) === 450, likes);
+  check("engagement refreshed after 5 minutes (450 likes)", Number(likes) === 450, likes);
+  check("re-reading posts the same day isn't counted again (X bills once per day)", reads() === readsBefore, { before: readsBefore, after: reads() });
+  const refreshesBefore = xCalls.filter((u) => /\/2\/tweets\?/.test(u)).length;
+  await runTracker();
+  check("no refresh again within 5 minutes", xCalls.filter((u) => /\/2\/tweets\?/.test(u)).length === refreshesBefore);
   const q2 = xCalls.filter((u) => u.includes("search/recent")).pop() ?? "";
   check("second search uses since_id (doesn't pay to re-read)", q2.includes("since_id="), q2);
 });
