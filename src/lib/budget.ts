@@ -46,8 +46,15 @@ export async function reserveX(estimate: number, purpose: Purpose): Promise<void
 
 const day = () => new Date().toISOString().slice(0, 10);
 
+// Same as sql/008_auto_track.sql, in case the host doesn't run migrations on deploy.
+let tableReady: Promise<unknown> | null = null;
+const ensureTable = () => (tableReady ??= q(
+  "CREATE TABLE IF NOT EXISTS x_billed (day TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (day, kind, id))",
+).catch((e) => { tableReady = null; throw e; }));
+
 /** Of these ids, the ones X hasn't billed us for yet today. Marks them billed. */
 async function firstReadsToday(kind: "post" | "user", ids: string[]): Promise<number> {
+  await ensureTable();
   const uniq = [...new Set(ids)];
   let fresh = 0;
   for (let i = 0; i < uniq.length; i += 200) {
@@ -77,6 +84,7 @@ export async function chargeX(purpose: Purpose, postIds: string[], userIds: stri
 
 /** Drops billing records from before yesterday (they no longer affect what X charges). */
 export async function pruneXBilled(): Promise<void> {
+  await ensureTable();
   await q("DELETE FROM x_billed WHERE day < $1", [new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)]);
 }
 
